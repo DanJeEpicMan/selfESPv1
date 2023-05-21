@@ -2,7 +2,41 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <windows.h>
+#include <TlHelp32.h>
 
+#include <objidl.h>
+#include <gdiplus.h>
+
+#include <thread>
+
+using namespace Gdiplus;
+#pragma comment (lib,"Gdiplus.lib")
+
+float width = 2560;
+float height = 1440;
+
+VOID OnPaintme(HDC hdc, int X, int Y)
+{
+	Graphics graphics(hdc);
+	Pen pen(Color(255, 0, 0, 225), 5);
+	graphics.DrawLine(&pen, X-3, Y-3, X+3, Y+3);
+
+}
+
+VOID OnPaintteam(HDC hdc, int X, int Y)
+{
+	Graphics graphics(hdc);
+	Pen pen(Color(255, 0, 225, 0), 5);
+	graphics.DrawLine(&pen, X - 3, Y - 3, X + 3, Y + 3);
+}
+
+VOID OnPainteteam(HDC hdc, int X, int Y)
+{
+	Graphics graphics(hdc);
+	Pen pen(Color(255, 225, 0, 0), 5);
+	graphics.DrawLine(&pen, X - 3, Y - 3, X + 3, Y + 3);
+}
 
 namespace alloffsets
 {
@@ -170,42 +204,134 @@ namespace offsets
 	constexpr ::std::ptrdiff_t m_iTeamNum = 0xF4;
 	constexpr ::std::ptrdiff_t m_iHealth = 0x100;
 	constexpr ::std::ptrdiff_t m_vecOrigin = 0x138;
+	constexpr ::std::ptrdiff_t m_dwBoneMatrix = 0x26A8;
 }
+
+struct view_matrix_t {
+	float* operator[ ](int index) {
+		return matrix[index];
+	}
+
+	float matrix[4][4];
+};
 
 struct Vector3
 {
 	float x, y, z;
 };
 
+struct Vector2
+{
+	float x, y;
+};
+
+struct Vector4
+{
+	float x, y, z, w;
+};
+
+float offsetx(float x)
+{
+	x = x+2500;
+	return x / 2;
+}
+
+float offsety(float y)
+{
+	y = y+1500;
+	return y / 2;
+}
+
+Vector2 WorldToScreen(const Vector3 pos, view_matrix_t matrix, float width, float height) {
+	//world space to clip space
+	float _x = matrix[0][0] * pos.x + matrix[0][1] * pos.y + matrix[0][2] * pos.z + matrix[0][3];
+	//std::cout << "x: " << _x << std::endl;
+	float _y = matrix[1][0] * pos.x + matrix[1][1] * pos.y + matrix[1][2] * pos.z + matrix[1][3];
+	//std::cout << "y: " << _y << std::endl;
+
+	float w = matrix[3][0] * pos.x + matrix[3][1] * pos.y + matrix[3][2] * pos.z + matrix[3][3];
+	//std::cout << "w: " << w << std::endl;
+
+	if (w < 0.01f)
+		return Vector2(0, 0);
+
+	float inv_w = 1.f / w;
+	_x *= inv_w;
+	_y *= inv_w;
+	//clip space to screen space
+	//std::cout << "x2: " << _x << std::endl;
+	//std::cout << "y2: " << _y << std::endl;
+
+	float x = width * .5f;
+	float y = height * .5f;
+	//std::cout << "x3: " << x << std::endl;
+	//std::cout << "y3: " << y << std::endl;
+
+	x += 0.5f * _x * width + 0.5f;
+	y -= 0.5f * _y * height + 0.5f;
+	//std::cout << "x4: " << x << std::endl;
+	//std::cout << "y4: " << y << std::endl;
+
+	return Vector2(x, y);
+}
+
 int main()
 {
 	const auto memory = Memory{ "csgo.exe" };
 	const auto client = memory.GetModuleAddress("client.dll");
 
-	std::cout << std::hex << "client.dll -> 0x" << client << std::dec << std::endl;
+	GdiplusStartupInput gdiplusStartupInput;
+	ULONG_PTR gdiplusToken;
+	GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+
+
+	HWND hWnd = FindWindow(NULL, TEXT("Counter-Strike: Global Offensive - Direct3D 9"));
+	HDC hdc;
+	hdc = GetDC(hWnd);
+
 	while (true)
 	{
-		//sleep loop for 1 millisecond
-		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-		//get local player
 		const auto localPlayer = memory.Read<std::uintptr_t>(client + offsets::dwLocalPlayer);
 		int localPlayerTeam = memory.Read<int>(localPlayer + offsets::m_iTeamNum);
-		std::cout << "localPlayer: " << localPlayer << " | localPlayerTeam: " << localPlayerTeam << std::endl;
-		Vector3 postion = memory.Read<Vector3>(localPlayer + offsets::m_vecOrigin);
-		//std::cout << "x: " << postion.x << " | y: " << postion.y << " | z: " << postion.z << std::endl;
+		view_matrix_t vm = memory.Read<view_matrix_t>(client + offsets::dwViewMatrix);
+
+		Vector3 position_m = memory.Read<Vector3>(localPlayer + offsets::m_vecOrigin);
+
+		//OnPaintme(hdc, offsetx(position_m.x), offsety(position_m.y));
 
 		for (int i = 1; i < 64; i++)// loops though all possible places where players would be
 		{
 			uintptr_t entity = memory.Read<uintptr_t>(client + offsets::dwEntityList + i * 0x10); //base entity + 0x10 = player 1 + 0x10 = player 2 etc
-			//std::cout << "list: " << i << "entity: " << entity << std::endl;
 
-			int health = memory.Read<int>(entity + offsets::m_iHealth); //gets health of current looping player
-			int team = memory.Read<int>(entity + offsets::m_iTeamNum); //gets team of current looping player
-			//std::cout << "health: " << health << " | team: " << team << std::endl;
+			int health = memory.Read<int>(entity + offsets::m_iHealth);
+			int team = memory.Read<int>(entity + offsets::m_iTeamNum);
+			if (team == 0) // if team is 0 then its not a player
+			{
+				continue;
+			}
 
-			Vector3 postion = memory.Read<Vector3>(entity + offsets::m_vecOrigin); //gets position of current looping player
-			//std::cout << "x: " << postion.x << " | y: " << postion.y << " | z: " << postion.z << std::endl;
+			Vector3 position = memory.Read<Vector3>(entity + offsets::m_vecOrigin);
+
+			// Get the screen coordinates of the entity.
+			Vector2 screenCoordinates = WorldToScreen(position, vm, width, height);
+
+			const auto bonematrix = memory.Read<std::uintptr_t>(entity + offsets::m_dwBoneMatrix);
+			//std::cout << "Bone Matrix: " << bonematrix << std::endl;
+
+			const auto playerHeadPosition = Vector3{
+				memory.Read<float>(bonematrix + 0x30 * 8 + 0x0C),
+				memory.Read<float>(bonematrix + 0x30 * 8 + 0x1C),
+				memory.Read<float>(bonematrix + 0x30 * 8 + 0x2C)
+			};
+
+			std::cout << "X: " << playerHeadPosition.x << " Y: " << playerHeadPosition.y << " Z: " << playerHeadPosition.z << std::endl;
+			//std::cout << "X: " << headPosition.x << " Y: " << headPosition.y << " Z: " << headPosition.z << std::endl;
+
+			// Render the entity at the screen coordinates.
+			OnPaintme(hdc, screenCoordinates.x, screenCoordinates.y);
+			//std::cout << "X: " << screenCoordinates.x << " Y: " << screenCoordinates.y << std::endl << std::endl;
 		}
 	}
 
@@ -218,8 +344,11 @@ int main()
 //Vector3                    |-|
 //Get local player           |-|
 //Get everyone else X,Y,Z    |-|
-//Draw a map of people       | |
+//Draw a map of people       |-|
 	//Get OpenGL to display  | |
-	//pos |x, y|			 | |
-	//display x, y from there| |
-//Go from there
+	//pos |x, y|			 |-|
+	//display x, y from there|-|
+//Get the view matrix        |-|
+//Make needed vecors         |-|
+//implement a wts func       | |
+//c++ template 4 overlay     | |
