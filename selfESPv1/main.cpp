@@ -10,32 +10,33 @@
 
 #include <thread>
 
+#include <cstdlib>
+#include <string> 
+
 using namespace Gdiplus;
 #pragma comment (lib,"Gdiplus.lib")
 
 float width = 2560;
 float height = 1440;
 
-VOID OnPaintme(HDC hdc, int X, int Y)
+VOID OnPainteteam(HDC hdc, int x, int y, int width, int height, int diff, int color1, int color2, int color3)
 {
+	using namespace Gdiplus;
 	Graphics graphics(hdc);
-	Pen pen(Color(255, 0, 0, 225), 5);
-	graphics.DrawLine(&pen, X-3, Y-3, X+3, Y+3);
-
+	Pen pen(Color(255, color1, color2, color3), 3);
+	//graphics.DrawLine(&pen, leftx, heady, rightx, heady);
+	//graphics.DrawLine(&pen, rightx, heady, rightx, feety);
+	//graphics.DrawLine(&pen, leftx, feety, rightx, feety);
+	//graphics.DrawLine(&pen, leftx, heady, leftx, feety);
+	graphics.DrawRectangle(&pen, x, y, width, height); // x, y, width, height
 }
 
-VOID OnPaintteam(HDC hdc, int X, int Y)
+VOID ehead(HDC hdc, int X, int Y)
 {
 	Graphics graphics(hdc);
-	Pen pen(Color(255, 0, 225, 0), 5);
-	graphics.DrawLine(&pen, X - 3, Y - 3, X + 3, Y + 3);
-}
+	Pen pen(Color(255, 255, 0, 0), 5);
+	graphics.DrawLine(&pen, X-2, Y-10, X+2, Y-10);
 
-VOID OnPainteteam(HDC hdc, int X, int Y)
-{
-	Graphics graphics(hdc);
-	Pen pen(Color(255, 225, 0, 0), 5);
-	graphics.DrawLine(&pen, X - 3, Y - 3, X + 3, Y + 3);
 }
 
 namespace alloffsets
@@ -291,7 +292,7 @@ int main()
 
 	while (true)
 	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		//std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
 		const auto localPlayer = memory.Read<std::uintptr_t>(client + offsets::dwLocalPlayer);
 		int localPlayerTeam = memory.Read<int>(localPlayer + offsets::m_iTeamNum);
@@ -312,7 +313,17 @@ int main()
 				continue;
 			}
 
+			if (health < 1) // if health is less than 1 then its dead
+			{
+				continue;
+			}
+
 			Vector3 position = memory.Read<Vector3>(entity + offsets::m_vecOrigin);
+
+			int diffx = std::abs(position_m.x - position.x);
+			int diffy = std::abs(position_m.y - position.y);
+			int diffz = std::abs(position_m.z - position.z);
+			int diff = diffx + diffy + diffz;
 
 			// Get the screen coordinates of the entity.
 			Vector2 screenCoordinates = WorldToScreen(position, vm, width, height);
@@ -326,18 +337,52 @@ int main()
 				memory.Read<float>(bonematrix + 0x30 * 8 + 0x2C)
 			};
 
-			std::cout << "X: " << playerHeadPosition.x << " Y: " << playerHeadPosition.y << " Z: " << playerHeadPosition.z << std::endl;
+			//std::cout << "X: " << playerHeadPosition.x << " Y: " << playerHeadPosition.y << " Z: " << playerHeadPosition.z << std::endl;
 			//std::cout << "X: " << headPosition.x << " Y: " << headPosition.y << " Z: " << headPosition.z << std::endl;
 
+			Vector2 screenCoordinatesHead = WorldToScreen(playerHeadPosition, vm, width, height);
+
 			// Render the entity at the screen coordinates.
-			OnPaintme(hdc, screenCoordinates.x, screenCoordinates.y);
+				//OnPaintme(hdc, screenCoordinates.x, screenCoordinates.y);
 			//std::cout << "X: " << screenCoordinates.x << " Y: " << screenCoordinates.y << std::endl << std::endl;
+				//OnPainteteam(hdc, screenCoordinatesHead.x, screenCoordinatesHead.y);
+
+			int middley_middle_math = ((screenCoordinatesHead.y - screenCoordinates.y) / 2); // middle Y
+			int height = std::abs(screenCoordinatesHead.y - screenCoordinates.y);
+			int middley = screenCoordinates.y + middley_middle_math; // middle true Y
+			int div3 = std::abs(middley_middle_math / 3); // 1/3 of the middle Y
+			int left = screenCoordinates.x - div3; // left X
+			int right = screenCoordinates.x + div3; // right X
+
+				//OnPaintteam(hdc, left, middley);
+				//OnPaintteam(hdc, right, middley);
+
+			//left, screenCoordinatesHead.y         right, screenCoordinatesHead.y
+			//
+			//left, screenCoordinates.y				right, screenCoordinates.y
+			int c1 = 0;
+			int c2 = 0;
+			int c3 = 0;
+			if (team != localPlayerTeam)
+			{
+				c1 = 255;
+				//ehead(hdc, screenCoordinatesHead.x, screenCoordinatesHead.y);
+
+			}
+			else if (team  == localPlayerTeam)
+			{
+				c2 = 255;
+			}
+
+			OnPainteteam(hdc, left, screenCoordinatesHead.y, div3 * 2, height, diff, c1, c2, c3);
+			//std::cout << std::endl;
 		}
 	}
 
 	return 0;
 }
       
+
 //Memory Class               |-|
 //Get the Offsets            |-|
 //Make a loop                |-|
